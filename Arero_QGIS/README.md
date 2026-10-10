@@ -150,6 +150,10 @@ The API uses JSON responses except for the multipart upload request. FastAPI val
 | `POST /api/files/` | Parses and measures a KML or zipped Shapefile, saves its results, and returns the dataset and features. | `201` with an `UploadResponse`. | `400` for unsupported/invalid/empty/oversized input; `422` when the required `file` field is absent; `503` when storing results fails. |
 | `GET /api/files/{file_id}/` | Returns stored file metadata. | `200` with a `FileResponse`. | `404` if the ID is unknown; `503` on database errors. |
 | `GET /api/files/{file_id}/measurements/` | Returns stored per-feature results. | `200` with a `MeasurementsResponse`. | `404` if the ID is unknown; `503` on database errors. |
+| `GET /api/files/{file_id}/export.csv` | Downloads feature IDs, source coordinates and CRS, properties, and measurements as CSV. | `200` with a downloadable CSV file. | `404` if the ID is unknown; `503` on database errors. |
+| `GET /api/files/{file_id}/export.geojson` | Downloads mapped features and measurement metadata as a GeoJSON FeatureCollection. | `200` with a downloadable GeoJSON file. | `404` if the ID is unknown; `503` on database errors. |
+
+The dashboard exposes both downloads after a dataset is processed. CSV coordinates use the source CRS. GeoJSON geometry uses WGS 84 coordinates when conversion is available; source CRS, projected CRS, original properties, and measurements are included as feature properties. If map conversion is unavailable, the GeoJSON geometry is `null` and the original geometry is included as `source_geometry`.
 
 ### `POST /api/files/`
 

@@ -1,7 +1,12 @@
+import csv
+import io
+import json
 import uuid
 from pathlib import PureWindowsPath
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from pymysql import MySQLError
 
 from app.schemas.file import (
@@ -19,6 +24,26 @@ from app.services.storage_service import get_features, get_file, save_processed_
 
 
 router = APIRouter(prefix="/api/files", tags=["files"])
+
+
+def _load_export_records(file_id: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        record = get_file(file_id)
+        if record is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        features = get_features(file_id)
+    except (MySQLError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=_database_error_detail(error, "export file data"),
+        ) from error
+    if features is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return record, features
+
+
+def _export_feature_id(file_id: str, feature: dict[str, Any]) -> str:
+    return f"{file_id}:{feature['index']}"
 
 
 def _database_error_detail(error: MySQLError | RuntimeError, action: str) -> str:
@@ -76,6 +101,93 @@ async def upload_file(file: UploadFile = File(...)) -> dict:
         "status": "COMPLETED",
         "features": features,
     }
+
+
+@router.get("/{file_id}/export.csv", response_class=Response)
+def export_csv(file_id: str) -> Response:
+    file_record, features = _load_export_records(file_id)
+    output = io.StringIO(newline="")
+    fieldnames = (
+        "feature_id",
+        "feature_index",
+        "geometry_type",
+        "coordinates",
+        "crs",
+        "source_crs",
+        "projected_crs",
+        "properties",
+        "measurement",
+        "measurement_unit",
+    )
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for feature in features:
+        geometry = feature["geometry"]
+        coordinates = None
+        if isinstance(geometry, dict):
+            coordinates = geometry.get("coordinates", geometry.get("geometries"))
+        writer.writerow(
+            {
+                "feature_id": _export_feature_id(file_id, feature),
+                "feature_index": feature["index"],
+                "geometry_type": feature["geometry_type"] or "",
+                "coordinates": json.dumps(coordinates, ensure_ascii=False)
+                if coordinates is not None
+                else "",
+                "crs": feature["source_crs"] or file_record["crs"] or "",
+                "source_crs": feature["source_crs"] or "",
+                "projected_crs": feature["projected_crs"] or "",
+                "properties": json.dumps(feature["properties"], ensure_ascii=False),
+                "measurement": feature["measurement"]
+                if feature["measurement"] is not None
+                else "",
+                "measurement_unit": feature["unit"] or "",
+            }
+        )
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="features.csv"'},
+    )
+
+
+@router.get("/{file_id}/export.geojson", response_class=Response)
+def export_geojson(file_id: str) -> Response:
+    file_record, features = _load_export_records(file_id)
+    geojson_features = []
+    for feature in features:
+        source_crs = feature["source_crs"] or file_record["crs"]
+        properties = {
+            "feature_id": _export_feature_id(file_id, feature),
+            "feature_index": feature["index"],
+            "geometry_type": feature["geometry_type"],
+            "crs": "EPSG:4326",
+            "source_crs": source_crs,
+            "projected_crs": feature["projected_crs"],
+            "properties": feature["properties"],
+            "measurement": feature["measurement"],
+            "measurement_unit": feature["unit"],
+        }
+        if feature["map_geometry"] is None and feature["geometry"] is not None:
+            properties["source_geometry"] = feature["geometry"]
+        geojson_features.append(
+            {
+                "type": "Feature",
+                "id": _export_feature_id(file_id, feature),
+                "geometry": feature["map_geometry"],
+                "properties": properties,
+            }
+        )
+    content = json.dumps(
+        {"type": "FeatureCollection", "features": geojson_features},
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return Response(
+        content=content,
+        media_type="application/geo+json",
+        headers={"Content-Disposition": 'attachment; filename="features.geojson"'},
+    )
 
 
 @router.get("/{file_id}/", response_model=FileResponse)

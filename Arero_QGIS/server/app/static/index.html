@@ -35,6 +35,11 @@
       #results { margin-top: 22px; }
       #results[hidden] { display: none; }
       .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0; }
+      .export-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 24px; }
+      .download-button { display: inline-flex; align-items: center; min-height: 42px; padding: 10px 16px; border-radius: 8px; color: #fff; background: #087f72; font-weight: 700; text-decoration: none; }
+      .download-button:hover { background: #066b61; }
+      .download-button:focus-visible { outline: 3px solid #d56935; outline-offset: 2px; }
+      .download-button[hidden] { display: none; }
       .stat { padding: 15px; border: 1px solid #e4ebe6; border-radius: 10px; background: #f8faf8; }
       .stat span { display: block; color: #73827e; font-size: 11px; font-weight: 700; letter-spacing: .1em; }
       .stat strong { display: block; margin-top: 7px; overflow-wrap: anywhere; font-size: 18px; }
@@ -60,6 +65,7 @@
         .panel { padding: 18px; }
         .upload-row { align-items: stretch; flex-direction: column; }
         button { width: 100%; }
+        .download-button { flex: 1; justify-content: center; }
       }
     </style>
   </head>
@@ -85,6 +91,10 @@
       <section id="results" class="panel" aria-labelledby="results-heading" hidden>
         <h2 id="results-heading">Processed results</h2>
         <div id="summary" class="summary"></div>
+        <div class="export-actions" aria-label="Export processed features">
+          <a id="export-csv" class="download-button" hidden>Export CSV</a>
+          <a id="export-geojson" class="download-button" hidden>Export GeoJSON</a>
+        </div>
         <h2>Map visualization</h2>
         <div id="map" role="application" aria-label="Map of uploaded feature geometries"></div>
         <p id="map-note" class="subtle" aria-live="polite"></p>
@@ -111,6 +121,8 @@
       const status = document.querySelector("#status");
       const results = document.querySelector("#results");
       const summary = document.querySelector("#summary");
+      const csvExport = document.querySelector("#export-csv");
+      const geojsonExport = document.querySelector("#export-geojson");
       const featureRows = document.querySelector("#features");
       const empty = document.querySelector("#empty");
       const detail = document.querySelector("#detail");
@@ -199,6 +211,11 @@
 
       function showResults(payload) {
         features = payload.features;
+        const filePath = `/api/files/${encodeURIComponent(payload.id)}`;
+        csvExport.href = `${filePath}/export.csv`;
+        geojsonExport.href = `${filePath}/export.geojson`;
+        csvExport.hidden = false;
+        geojsonExport.hidden = false;
         summary.replaceChildren();
         featureRows.replaceChildren();
         rowByIndex = new Map();
