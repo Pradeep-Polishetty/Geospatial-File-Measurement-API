@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101a1c">
+    <title>Geospatial File Measurement</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172426;
+        background: #f2f5f2;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; }
+      header { padding: 32px max(24px, calc((100vw - 1120px) / 2)); color: #f5faf7; background: #101a1c; }
+      header p { margin: 0 0 9px; color: #8fcec0; font-size: 12px; font-weight: 700; letter-spacing: .16em; }
+      h1 { margin: 0; font-size: clamp(27px, 4vw, 42px); letter-spacing: -.04em; }
+      header .intro { max-width: 620px; margin: 12px 0 0; color: #b5c4c2; line-height: 1.6; }
+      main { width: min(1120px, calc(100% - 40px)); margin: 28px auto 64px; }
+      .panel { padding: 24px; border: 1px solid #dce5df; border-radius: 14px; background: #fff; box-shadow: 0 10px 28px #2035310a; }
+      h2 { margin: 0; font-size: 19px; }
+      .subtle { color: #687976; font-size: 14px; line-height: 1.5; }
+      .upload-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 20px; }
+      input[type=file] { max-width: 100%; flex: 1; padding: 11px; border: 1px solid #dce5df; border-radius: 8px; color: #526460; background: #fbfcfa; }
+      button { border: 0; border-radius: 8px; padding: 12px 18px; color: #fff; background: #087f72; font: inherit; font-weight: 700; cursor: pointer; }
+      button:hover { background: #066b61; }
+      button:disabled { opacity: .55; cursor: wait; }
+      #status { min-height: 22px; margin: 14px 0 0; color: #526460; font-size: 14px; }
+      #status.error { color: #a23d34; }
+      #results { margin-top: 22px; }
+      #results[hidden] { display: none; }
+      .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 20px 0; }
+      .stat { padding: 15px; border: 1px solid #e4ebe6; border-radius: 10px; background: #f8faf8; }
+      .stat span { display: block; color: #73827e; font-size: 11px; font-weight: 700; letter-spacing: .1em; }
+      .stat strong { display: block; margin-top: 7px; overflow-wrap: anywhere; font-size: 18px; }
+      #map { width: 100%; height: 440px; margin-top: 18px; border: 1px solid #dce5df; border-radius: 10px; background: #e9efeb; }
+      #map-note { margin: 10px 0 0; }
+      .table-wrap { overflow-x: auto; border: 1px solid #e4ebe6; border-radius: 10px; }
+      table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+      th, td { padding: 12px 14px; border-bottom: 1px solid #edf1ee; vertical-align: top; }
+      th { color: #64746f; background: #f7f9f7; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+      tr:last-child td { border-bottom: 0; }
+      tbody tr { cursor: pointer; }
+      tbody tr:hover, tbody tr.selected { background: #edf7f3; }
+      td.name { min-width: 170px; overflow-wrap: anywhere; font-weight: 600; }
+      td.measurement { white-space: nowrap; }
+      #detail { margin-top: 18px; padding: 18px; border-radius: 10px; background: #f7f9f7; }
+      #detail h3 { margin: 0 0 10px; font-size: 15px; }
+      pre { max-height: 300px; overflow: auto; margin: 0; color: #485a55; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .empty { padding: 24px; color: #687976; text-align: center; }
+      footer { margin-top: 22px; color: #81908a; font-size: 12px; text-align: center; }
+      @media (max-width: 600px) {
+        header { padding: 26px 20px; }
+        main { width: min(100% - 24px, 1120px); margin-top: 14px; }
+        .panel { padding: 18px; }
+        .upload-row { align-items: stretch; flex-direction: column; }
+        button { width: 100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p>SPATIAL DATA TOOLKIT</p>
+      <h1>Geospatial File Measurement</h1>
+      <p class="intro">Upload a KML or zipped Shapefile to inspect its features and calculate polygon areas and route lengths. Processed results are stored in the configured database.</p>
+    </header>
+    <main>
+      <section class="panel" aria-labelledby="upload-heading">
+        <h2 id="upload-heading">Process a dataset</h2>
+        <p class="subtle">Choose a KML file or a ZIP containing one Shapefile. Maximum upload size: 50 MB.</p>
+        <form id="upload-form">
+          <div class="upload-row">
+            <input id="file" name="file" type="file" accept=".kml,.zip" required>
+            <button id="submit" type="submit">Process file</button>
+          </div>
+        </form>
+        <p id="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="results" class="panel" aria-labelledby="results-heading" hidden>
+        <h2 id="results-heading">Processed results</h2>
+        <div id="summary" class="summary"></div>
+        <h2>Map visualization</h2>
+        <div id="map" role="application" aria-label="Map of uploaded feature geometries"></div>
+        <p id="map-note" class="subtle" aria-live="polite"></p>
+        <h2 style="margin-top: 24px">Features</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Index</th><th>Feature</th><th>Geometry</th><th>Measurement</th></tr></thead>
+            <tbody id="features"></tbody>
+          </table>
+          <p id="empty" class="empty" hidden>No features were returned.</p>
+        </div>
+        <section id="detail" aria-live="polite" hidden>
+          <h3 id="detail-heading">Feature details</h3>
+          <pre id="detail-content"></pre>
+        </section>
+      </section>
+      <footer>Uploaded files are processed in memory; processed measurements are stored in the database.</footer>
+    </main>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      const form = document.querySelector("#upload-form");
+      const fileInput = document.querySelector("#file");
+      const submitButton = document.querySelector("#submit");
+      const status = document.querySelector("#status");
+      const results = document.querySelector("#results");
+      const summary = document.querySelector("#summary");
+      const featureRows = document.querySelector("#features");
+      const empty = document.querySelector("#empty");
+      const detail = document.querySelector("#detail");
+      const detailHeading = document.querySelector("#detail-heading");
+      const detailContent = document.querySelector("#detail-content");
+      const mapNote = document.querySelector("#map-note");
+      const map = window.L
+        ? L.map("map").setView([20, 0], 2)
+        : null;
+      if (map) {
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
+      }
+      let mapLayer = null;
+      let layerByIndex = new Map();
+      let rowByIndex = new Map();
+      let features = [];
+
+      function setStatus(message, isError = false) {
+        status.textContent = message;
+        status.classList.toggle("error", isError);
+      }
+
+      function addStat(label, value) {
+        const card = document.createElement("div");
+        card.className = "stat";
+        const caption = document.createElement("span");
+        caption.textContent = label;
+        const content = document.createElement("strong");
+        content.textContent = value ?? "Unknown";
+        card.append(caption, content);
+        summary.append(card);
+      }
+
+      function featureName(feature) {
+        const properties = feature.properties || {};
+        return properties.Name || properties.name || properties.title || `Feature ${feature.index}`;
+      }
+
+      function formatMeasurement(feature) {
+        if (feature.measurement === null || feature.measurement === undefined) return "Not measured";
+        const amount = Number(feature.measurement);
+        return Number.isFinite(amount)
+          ? `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${feature.unit || ""}`.trim()
+          : "Not measured";
+      }
+
+      function selectFeature(feature, row, shouldZoom = true) {
+        featureRows.querySelectorAll("tr").forEach((item) => item.classList.remove("selected"));
+        row.classList.add("selected");
+        for (const [index, layer] of layerByIndex) {
+          layer.setStyle({
+            color: index === feature.index ? "#d56935" : "#087f78",
+            weight: index === feature.index ? 4 : 2.5,
+            fillColor: index === feature.index ? "#f4a56b" : "#36a79b",
+            fillOpacity: index === feature.index ? 0.68 : 0.34,
+          });
+          if (layer.setRadius) layer.setRadius(index === feature.index ? 9 : 7);
+        }
+        if (shouldZoom && map) {
+          const layer = layerByIndex.get(feature.index);
+          const bounds = layer?.getBounds();
+          if (bounds?.isValid()) {
+            if (bounds.getSouthWest().equals(bounds.getNorthEast())) {
+              map.flyTo(bounds.getSouthWest(), 15);
+            } else {
+              map.flyToBounds(bounds, { padding: [32, 32], maxZoom: 15 });
+            }
+          }
+        }
+        detail.hidden = false;
+        detailHeading.textContent = `${featureName(feature)} · ${feature.geometry_type || "Unknown"}`;
+        detailContent.textContent = JSON.stringify({
+          properties: feature.properties,
+          source_crs: feature.source_crs,
+          projected_crs: feature.projected_crs,
+          geometry: feature.geometry,
+          map_error: feature.map_error,
+          measurement: feature.measurement,
+          unit: feature.unit,
+          processing_error: feature.processing_error,
+        }, null, 2);
+      }
+
+      function showResults(payload) {
+        features = payload.features;
+        summary.replaceChildren();
+        featureRows.replaceChildren();
+        rowByIndex = new Map();
+        layerByIndex = new Map();
+        detail.hidden = true;
+        addStat("FILE", payload.filename);
+        addStat("FILE ID", payload.id);
+        addStat("FEATURES", String(payload.feature_count));
+        addStat("SOURCE CRS", payload.crs || "Unknown");
+        addStat("STATUS", payload.status);
+        empty.hidden = features.length > 0;
+
+        for (const feature of features) {
+          const row = document.createElement("tr");
+          const values = [
+            String(feature.index),
+            featureName(feature),
+            feature.geometry_type || "Unknown",
+            formatMeasurement(feature),
+          ];
+          values.forEach((value, index) => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            if (index === 1) cell.className = "name";
+            if (index === 3) cell.className = "measurement";
+            row.append(cell);
+          });
+          row.addEventListener("click", () => selectFeature(feature, row));
+          featureRows.append(row);
+          rowByIndex.set(feature.index, row);
+        }
+        drawFeaturesOnMap();
+        results.hidden = false;
+        if (features.length && rowByIndex.has(features[0].index)) {
+          selectFeature(features[0], rowByIndex.get(features[0].index));
+        }
+      }
+
+      function drawFeaturesOnMap() {
+        if (!map) {
+          mapNote.textContent = "The map library could not be loaded. Check your connection and reload the page.";
+          return;
+        }
+        if (mapLayer) mapLayer.remove();
+        layerByIndex = new Map();
+        const mappedFeatures = features
+          .filter((feature) => feature.map_geometry)
+          .map((feature) => ({
+            type: "Feature",
+            geometry: feature.map_geometry,
+            properties: { featureIndex: feature.index },
+          }));
+        const unavailableCount = features.length - mappedFeatures.length;
+        const unavailableReasons = [...new Set(
+          features.filter((feature) => !feature.map_geometry)
+            .map((feature) => feature.map_error || "Geometry or source CRS is unavailable."),
+        )];
+        mapNote.textContent = unavailableCount
+          ? `${unavailableCount} feature${unavailableCount === 1 ? "" : "s"} could not be shown on the map: ${unavailableReasons.join(" ")}`
+          : mappedFeatures.length
+            ? "Click a map feature or a table row to inspect and zoom to it."
+            : "No mappable feature geometry was returned.";
+        mapLayer = L.geoJSON(
+          { type: "FeatureCollection", features: mappedFeatures },
+          {
+            style: () => ({
+              color: "#087f78",
+              weight: 2.5,
+              opacity: 0.95,
+              fillColor: "#36a79b",
+              fillOpacity: 0.34,
+            }),
+            pointToLayer: (_feature, latlng) => L.circleMarker(latlng, {
+              radius: 7,
+              color: "#ffffff",
+              weight: 2,
+              fillColor: "#087f78",
+              fillOpacity: 0.96,
+            }),
+            onEachFeature: (geoFeature, layer) => {
+              const index = geoFeature.properties.featureIndex;
+              layerByIndex.set(index, layer);
+              layer.on("click", () => {
+                const row = rowByIndex.get(index);
+                const feature = features.find((item) => item.index === index);
+                if (row && feature) selectFeature(feature, row, false);
+              });
+            },
+          },
+        ).addTo(map);
+        const bounds = mapLayer.getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [32, 32], maxZoom: 14 });
+        requestAnimationFrame(() => map.invalidateSize());
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const file = fileInput.files[0];
+        if (!file) return;
+        if (!/\.(kml|zip)$/i.test(file.name)) {
+          setStatus("Choose a .kml file or a .zip containing a Shapefile.", true);
+          return;
+        }
+        if (file.size === 0 || file.size > 50 * 1024 * 1024) {
+          setStatus(file.size === 0 ? "The selected file is empty." : "The maximum upload size is 50 MB.", true);
+          return;
+        }
+
+        submitButton.disabled = true;
+        submitButton.textContent = "Processing...";
+        results.hidden = true;
+        setStatus("Uploading and processing the file...");
+        try {
+          const body = new FormData();
+          body.append("file", file);
+          const response = await fetch("/api/files/", { method: "POST", body });
+          let payload;
+          try {
+            payload = await response.json();
+          } catch {
+            throw new Error("The server returned an invalid response.");
+          }
+          if (!response.ok) throw new Error(payload.detail || `The server returned HTTP ${response.status}.`);
+          if (!Array.isArray(payload.features) || typeof payload.filename !== "string" || typeof payload.id !== "string") {
+            throw new Error("The server returned invalid measurement data.");
+          }
+          showResults(payload);
+          setStatus("File processed successfully.");
+        } catch (error) {
+          setStatus(error.message || "Unable to process this file.", true);
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = "Process file";
+        }
+      });
+    </script>
+  </body>
+</html>
